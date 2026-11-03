@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Monitoreo de personal</title>
+
+  <link rel="stylesheet" href="./styles.css">
+
+  <style>
+    /* Cuatro tarjetas */
+    .summary-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    /* Solo mes y día */
+    .filters {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      max-width: 720px;
+    }
+
+    /* Gráficos con espacio para todas las etiquetas */
+    .chart {
+      overflow-x: auto;
+    }
+
+    #grafico-dias svg {
+      min-width: 1050px;
+    }
+
+    #grafico-horas svg {
+      min-width: 900px;
+    }
+
+    .chart svg .point-value {
+      fill: #172b4d;
+      font-size: 10px;
+      font-weight: 700;
+      paint-order: stroke;
+      stroke: #ffffff;
+      stroke-width: 3px;
+      stroke-linejoin: round;
+    }
+
+    .chart svg .axis-label {
+      fill: #61738d;
+      font-size: 10px;
+    }
+
+    .chart-value {
+      color: #172b4d;
+      font-weight: 700;
+    }
+
+    @media (max-width: 800px) {
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 500px) {
+      .filters {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="dashboard">
+
+    <!-- ENCABEZADO -->
+    <div class="page-heading">
+      <h1>Monitoreo de personal</h1>
+    </div>
+
+    <p
+      id="mensaje-panel"
+      class="message"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    ></p>
+
+    <!-- FILTROS -->
+    <section class="panel" aria-labelledby="titulo-filtros">
+      <h2 id="titulo-filtros">Filtros</h2>
+
+      <form
+        id="form-filtros"
+        class="filters"
+        aria-label="Filtrar por mes y día"
+      >
+        <div class="field">
+          <label for="filtro-mes">Mes</label>
+
+          <input
+            id="filtro-mes"
+            name="mes"
+            type="month"
+          >
+        </div>
+
+        <div class="field">
+          <label for="filtro-dia">Día</label>
+
+          <input
+            id="filtro-dia"
+            name="dia"
+            type="date"
+          >
+        </div>
+
+        <!-- Compatibilidad con el app.js anterior -->
+        <div hidden>
+          <input id="filtro-busqueda" type="search">
+
+          <select id="filtro-estado">
+            <option value="todos" selected>Todos</option>
+          </select>
+
+          <select id="filtro-clase">
+            <option value="todas" selected>Todas</option>
+          </select>
+
+          <select id="filtro-area">
+            <option value="todas" selected>Todas</option>
+          </select>
+
+          <input id="filtro-desde" type="date">
+          <input id="filtro-hasta" type="date">
+
+          <select id="filtro-historial">
+            <option value="todos" selected>
+              Historial completo
+            </option>
+          </select>
+        </div>
+      </form>
+    </section>
+
+    <!-- INDICADORES -->
+    <section class="summary-grid" aria-label="Resumen">
+      <article class="summary-card">
+        <p>Registros totales</p>
+        <strong id="total-registros">—</strong>
+      </article>
+
+      <article class="summary-card">
+        <p>Registros de hoy</p>
+        <strong id="registros-hoy">—</strong>
+      </article>
+
+      <article class="summary-card summary-card-warning">
+        <p>Próximos a vencer</p>
+        <strong id="licencias-por-vencer">—</strong>
+      </article>
+
+      <article class="summary-card summary-card-danger">
+        <p>Vencidas</p>
+        <strong id="licencias-vencidas">—</strong>
+      </article>
+    </section>
+
+    <!-- GRÁFICOS -->
+    <section class="charts-grid" aria-label="Actividad de registros">
+
+      <section class="panel" aria-labelledby="titulo-dias">
+        <h2 id="titulo-dias">Registros por día del mes</h2>
+
+        <p id="periodo-grafico" hidden></p>
+
+        <div id="grafico-dias" class="chart"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="titulo-semana">
+        <h2 id="titulo-semana">Registros por día de semana</h2>
+
+        <div id="grafico-semana" class="chart"></div>
+      </section>
+
+      <section
+        class="panel chart-wide"
+        aria-labelledby="titulo-horas"
+      >
+        <h2 id="titulo-horas">Registros por hora</h2>
+
+        <div id="grafico-horas" class="chart"></div>
+      </section>
+
+    </section>
+
+    <!-- ALERTAS Y FUNCIÓN -->
+    <div class="charts-grid">
+
+      <section class="panel" aria-labelledby="titulo-alertas">
+        <div class="panel-heading">
+          <h2 id="titulo-alertas">Alertas de vencimiento</h2>
+
+          <span id="cantidad-alertas" class="badge">—</span>
+        </div>
+
+        <div
+          id="lista-alertas"
+          class="alerts-list"
+          aria-live="polite"
+          aria-busy="true"
+        ></div>
+
+        <p id="alertas-vacias" class="empty-state" hidden>
+          No hay licencias vencidas ni próximas a vencer.
+        </p>
+      </section>
+
+      <section class="panel" aria-labelledby="titulo-funcion">
+        <h2 id="titulo-funcion">Registros por función</h2>
+
+        <div id="grafico-funcion" class="chart"></div>
+      </section>
+
+    </div>
+
+    <!-- TABLA -->
+    <section class="panel" aria-labelledby="titulo-registros">
+      <div class="panel-heading">
+        <h2 id="titulo-registros">Personal registrado</h2>
+
+        <span id="cantidad-resultados" class="badge">—</span>
+      </div>
+
+      <div
+        class="table-container"
+        role="region"
+        aria-label="Registros del personal"
+        tabindex="0"
+      >
+        <table class="records-table">
+          <caption class="sr-only">
+            Personal registrado, licencia y fecha de registro
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Personal</th>
+              <th scope="col">Documento</th>
+              <th scope="col">Área</th>
+              <th scope="col">Función</th>
+              <th scope="col">Categoría</th>
+              <th scope="col">Vencimiento</th>
+              <th scope="col">Estado</th>
+              <th scope="col">Registro</th>
+              <th scope="col">Detalle</th>
+            </tr>
+          </thead>
+
+          <tbody id="tabla-registros"></tbody>
+        </table>
+      </div>
+
+      <p id="registros-vacios" class="empty-state" hidden>
+        No se encontraron registros.
+      </p>
+
+      <nav class="pagination" aria-label="Páginas de registros">
+        <button
+          id="pagina-anterior"
+          class="button button-secondary"
+          type="button"
+          disabled
+        >
+          Anterior
+        </button>
+
+        <span id="info-paginacion" role="status">—</span>
+
+        <button
+          id="pagina-siguiente"
+          class="button button-secondary"
+          type="button"
+          disabled
+        >
+          Siguiente
+        </button>
+      </nav>
+    </section>
+
+    <!-- Elementos internos requeridos por el app.js anterior -->
+    <div hidden>
+      <span id="estado-conexion"></span>
+      <span id="total-personas"></span>
+
+      <button id="btn-actualizar" type="button" hidden>
+        Actualizar
+      </button>
+
+      <button id="btn-exportar" type="button" hidden disabled>
+        Exportar
+      </button>
+    </div>
+
+  </main>
+
+  <!-- DETALLE -->
+  <dialog
+    id="modal-personal"
+    class="detail-dialog"
+    aria-labelledby="detalle-nombre"
+  >
+    <div class="dialog-heading">
+      <h2 id="detalle-nombre">Detalle del personal</h2>
+
+      <form method="dialog">
+        <button
+          class="button button-secondary"
+          type="submit"
+          autofocus
+        >
+          Cerrar
+        </button>
+      </form>
+    </div>
+
+    <dl class="detail-grid">
+      <div>
+        <dt>Documento</dt>
+        <dd id="detalle-documento">—</dd>
+      </div>
+
+      <div>
+        <dt>N° de personal</dt>
+        <dd id="detalle-orden">—</dd>
+      </div>
+
+      <div>
+        <dt>Área</dt>
+        <dd id="detalle-area">—</dd>
+      </div>
+
+      <div>
+        <dt>Sector</dt>
+        <dd id="detalle-sector">—</dd>
+      </div>
+
+      <div>
+        <dt>Función</dt>
+        <dd id="detalle-funcion">—</dd>
+      </div>
+
+      <div>
+        <dt>Condición laboral</dt>
+        <dd id="detalle-condicion">—</dd>
+      </div>
+
+      <div>
+        <dt>Clase</dt>
+        <dd id="detalle-clase">—</dd>
+      </div>
+
+      <div>
+        <dt>Categoría</dt>
+        <dd id="detalle-categoria">—</dd>
+      </div>
+
+      <div>
+        <dt>Vencimiento</dt>
+        <dd id="detalle-vencimiento">—</dd>
+      </div>
+
+      <div>
+        <dt>Estado</dt>
+        <dd id="detalle-estado">—</dd>
+      </div>
+
+      <div>
+        <dt>Fecha de registro</dt>
+        <dd id="detalle-fecha-registro">—</dd>
+      </div>
+
+      <div>
+        <dt>Hora de registro</dt>
+        <dd id="detalle-hora-registro">—</dd>
+      </div>
+    </dl>
+
+    <section class="license-photo" aria-labelledby="titulo-foto">
+      <h3 id="titulo-foto">Foto de la licencia</h3>
+
+      <a
+        id="detalle-foto-enlace"
+        target="_blank"
+        rel="noopener noreferrer"
+        hidden
+      >
+        <img
+          id="detalle-foto"
+          alt="Fotografía de la licencia de conducir"
+        >
+      </a>
+
+      <p id="detalle-sin-foto" class="empty-state" hidden>
+        Foto no disponible.
+      </p>
+    </section>
+  </dialog>
+
+  <noscript>
+    Activa JavaScript para consultar el monitoreo.
+  </noscript>
+
+  <!-- Valores y etiquetas siempre visibles en los gráficos -->
+  <script>
+    (() => {
+      const SVG_NS = "http://www.w3.org/2000/svg";
+
+      function mostrarEtiquetas(contenedor) {
+        const svg = contenedor.querySelector("svg");
+
+        if (!svg || svg.dataset.etiquetasVisibles === "true") {
+          return;
+        }
+
+        svg.dataset.etiquetasVisibles = "true";
+
+        const puntos = [...svg.querySelectorAll("circle")];
+
+        // Quitar únicamente las etiquetas anteriores del eje horizontal.
+        svg.querySelectorAll("text").forEach(elemento => {
+          if (elemento.getAttribute("y") === "222") {
+            elemento.remove();
+          }
+        });
+
+        puntos.forEach(punto => {
+          const titulo = punto.querySelector("title")?.textContent || "";
+
+          // Ejemplos: "3: 12 registros" y "10:00: 12 registros".
+          const coincidencia = titulo.match(/^(.*):\s*(\d+)\s+registros$/);
+
+          if (!coincidencia) {
+            return;
+          }
+
+          const etiqueta = coincidencia[1];
+          const cantidad = coincidencia[2];
+
+          const x = Number(punto.getAttribute("cx"));
+          const y = Number(punto.getAttribute("cy"));
+
+          const valor = document.createElementNS(SVG_NS, "text");
+
+          valor.setAttribute("x", x);
+          valor.setAttribute("y", y - 10);
+          valor.setAttribute("text-anchor", "middle");
+          valor.setAttribute("class", "point-value");
+          valor.textContent = cantidad;
+
+          svg.appendChild(valor);
+
+          const etiquetaEje = document.createElementNS(SVG_NS, "text");
+
+          etiquetaEje.setAttribute("x", x);
+          etiquetaEje.setAttribute("y", 222);
+          etiquetaEje.setAttribute("text-anchor", "middle");
+          etiquetaEje.setAttribute("class", "axis-label");
+          etiquetaEje.textContent = etiqueta;
+
+          svg.appendChild(etiquetaEje);
+        });
+      }
+
+      ["grafico-dias", "grafico-horas"].forEach(id => {
+        const contenedor = document.getElementById(id);
+
+        const observador = new MutationObserver(() => {
+          mostrarEtiquetas(contenedor);
+        });
+
+        observador.observe(contenedor, {
+          childList: true,
+          subtree: true
+        });
+
+        mostrarEtiquetas(contenedor);
+      });
+    })();
+  </script>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
