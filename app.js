@@ -19,7 +19,7 @@ import {
 // ============================================
 
 const ZONA_HORARIA = "America/Lima";
-const DIAS_ALERTA = 30;
+const MESES_ALERTA = 2;
 const REGISTROS_POR_PAGINA = 20;
 const MILISEGUNDOS_DIA = 86400000;
 
@@ -76,7 +76,6 @@ const interfaz = {
 // ============================================
 
 let registros = [];
-let ultimosRegistros = [];
 let registrosFiltrados = [];
 
 let paginaActual = 1;
@@ -188,6 +187,28 @@ function diferenciaDias(fechaISO, baseISO = diaActual) {
   );
 }
 
+// Suma meses calendario.
+// Si el día no existe en el mes de destino, usa su último día.
+function sumarMeses(fechaISO, meses) {
+  const [anio, mes, dia] = fechaISO.split("-").map(Number);
+
+  const destino = new Date(
+    Date.UTC(anio, mes - 1 + meses, 1)
+  );
+
+  const ultimoDia = new Date(
+    Date.UTC(
+      destino.getUTCFullYear(),
+      destino.getUTCMonth() + 1,
+      0
+    )
+  ).getUTCDate();
+
+  destino.setUTCDate(Math.min(dia, ultimoDia));
+
+  return destino.toISOString().slice(0, 10);
+}
+
 function mostrarFecha(fechaISO) {
   if (!fechaISOValida(fechaISO)) {
     return "—";
@@ -212,6 +233,38 @@ function convertirTimestamp(valor) {
   } catch {
     return null;
   }
+}
+
+// Las fechas de texto conservan su día.
+// Los Timestamp y Date se interpretan en horario de Perú.
+function normalizarVencimiento(valor) {
+  if (typeof valor === "string") {
+    const cadena = valor.trim();
+
+    if (fechaISOValida(cadena)) {
+      return cadena;
+    }
+
+    const partes = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(cadena);
+
+    if (!partes) {
+      return "";
+    }
+
+    const iso = `${partes[3]}-${partes[2]}-${partes[1]}`;
+
+    return fechaISOValida(iso) ? iso : "";
+  }
+
+  const fecha = convertirTimestamp(valor);
+
+  if (!fecha) {
+    return "";
+  }
+
+  const iso = obtenerDiaPeru(fecha);
+
+  return fechaISOValida(iso) ? iso : "";
 }
 
 function mostrarHora(fecha) {
@@ -284,7 +337,9 @@ function obtenerEstado(registro) {
     };
   }
 
-  if (dias <= DIAS_ALERTA) {
+  const limiteAlerta = sumarMeses(diaActual, MESES_ALERTA);
+
+  if (registro.fechaVencimiento <= limiteAlerta) {
     return {
       codigo: "por-vencer",
       etiqueta: "Por vencer",
@@ -366,7 +421,10 @@ function prepararRegistro(documento) {
 
     claseLicencia: texto(datos.claseLicencia),
     categoriaLicencia: texto(datos.categoriaLicencia),
-    fechaVencimiento: texto(datos.fechaVencimiento),
+
+    fechaVencimiento: normalizarVencimiento(
+      datos.fechaVencimiento
+    ),
 
     fechaRegistro,
     diaRegistro,
@@ -394,18 +452,6 @@ function ordenarRecientes(lista) {
   });
 }
 
-function obtenerUltimosPorDocumento(lista) {
-  const documentos = new Map();
-
-  ordenarRecientes(lista).forEach(registro => {
-    if (!documentos.has(registro.dni)) {
-      documentos.set(registro.dni, registro);
-    }
-  });
-
-  return [...documentos.values()];
-}
-
 // ============================================
 // 8. CONEXIÓN EN TIEMPO REAL
 // ============================================
@@ -430,10 +476,6 @@ function conectarRegistros() {
         snapshot.docs
           .map(prepararRegistro)
           .filter(Boolean)
-      );
-
-      ultimosRegistros = obtenerUltimosPorDocumento(
-        registros
       );
 
       establecerConexion(
@@ -472,6 +514,9 @@ function conectarRegistros() {
 // ============================================
 
 function aplicarFiltros(reiniciarPagina = true) {
+  // Actualizar hoy antes de calcular estados y contadores.
+  diaActual = obtenerDiaPeru();
+
   if (reiniciarPagina) {
     paginaActual = 1;
   }
@@ -498,14 +543,9 @@ function aplicarFiltros(reiniciarPagina = true) {
 }
 
 function licenciasFiltradas() {
-  // Solo se alerta sobre la última licencia de cada persona.
-  const rutasActuales = new Set(
-    ultimosRegistros.map(registro => registro.ruta)
-  );
-
-  return registrosFiltrados.filter(
-    registro => rutasActuales.has(registro.ruta)
-  );
+  // Los DNI ya son únicos: se cuentan directamente los registros.
+  // Mes y día solo filtran la actividad de registro.
+  return registros;
 }
 
 // ============================================
@@ -722,7 +762,6 @@ function dibujarLinea(contenedor, datos, color, descripcion) {
 
   const ns = "http://www.w3.org/2000/svg";
 
-  // Cada dato tiene espacio propio para evitar superposiciones.
   const ancho = Math.max(760, datos.length * 44 + 90);
   const alto = 300;
 
@@ -759,7 +798,6 @@ function dibujarLinea(contenedor, datos, color, descripcion) {
     ...datos.map(dato => dato.cantidad)
   );
 
-  // Escala con marcas enteras.
   const paso = Math.max(1, Math.ceil(maximo / 4));
   const limite = Math.ceil(maximo / paso) * paso;
 
@@ -818,7 +856,6 @@ function dibujarLinea(contenedor, datos, color, descripcion) {
       `${posicionX(indice)},${posicionY(dato.cantidad)}`
   );
 
-  // Fondo suave debajo de la línea.
   if (datos.length > 1) {
     elemento("polygon", {
       points: [
@@ -860,7 +897,6 @@ function dibujarLinea(contenedor, datos, color, descripcion) {
 
     punto.append(detalle);
 
-    // Cantidad siempre visible.
     const valor = elemento(
       "text",
       {
@@ -880,7 +916,6 @@ function dibujarLinea(contenedor, datos, color, descripcion) {
 
     valor.style.fill = COLORES.texto;
 
-    // Todos los días y horas permanecen visibles.
     elemento(
       "text",
       {
@@ -1097,7 +1132,6 @@ async function abrirDetalle(registro) {
   const versionActual = ++versionFoto;
   const estado = obtenerEstado(registro);
 
-  // Cancelar manejadores de la fotografía anterior.
   interfaz.foto.onload = null;
   interfaz.foto.onerror = null;
 
@@ -1259,7 +1293,6 @@ interfaz.mes.addEventListener("change", () => {
 });
 
 interfaz.dia.addEventListener("change", () => {
-  // Mantener mes y día sincronizados.
   if (interfaz.dia.value) {
     interfaz.mes.value = interfaz.dia.value.slice(0, 7);
   }
@@ -1291,8 +1324,31 @@ interfaz.modal.addEventListener("close", () => {
 });
 
 // ============================================
-// 18. CAMBIO DE DÍA
+// 18. ACTUALIZACIÓN AUTOMÁTICA DEL DÍA
 // ============================================
+
+let temporizadorMedianoche = null;
+
+function programarMedianochePeru() {
+  clearTimeout(temporizadorMedianoche);
+
+  const ahora = new Date();
+  const hoyPeru = obtenerDiaPeru(ahora);
+
+  // Medianoche de Perú: UTC-05:00.
+  const siguienteMedianoche =
+    Date.parse(`${hoyPeru}T00:00:00-05:00`) +
+    MILISEGUNDOS_DIA;
+
+  const demora = Math.max(
+    1,
+    siguienteMedianoche - ahora.getTime() + 100
+  );
+
+  temporizadorMedianoche = setTimeout(() => {
+    comprobarCambioDeDia();
+  }, demora);
+}
 
 function comprobarCambioDeDia() {
   const nuevoDia = obtenerDiaPeru();
@@ -1301,9 +1357,15 @@ function comprobarCambioDeDia() {
     diaActual = nuevoDia;
     aplicarFiltros(false);
   }
+
+  programarMedianochePeru();
 }
 
+// Respaldo ante suspensión del equipo o cambios del reloj.
 setInterval(comprobarCambioDeDia, 60000);
+
+window.addEventListener("focus", comprobarCambioDeDia);
+window.addEventListener("pageshow", comprobarCambioDeDia);
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
@@ -1319,3 +1381,4 @@ interfaz.mes.value = diaActual.slice(0, 7);
 
 aplicarFiltros(false);
 conectarRegistros();
+programarMedianochePeru();
